@@ -12,11 +12,11 @@ def get_env_var(key):
         exit(1)
     return value
 
-# Variabili d’ambiente (matchano i nomi in Railway)
+# Variabili d’ambiente
 TOKEN = get_env_var("BOT_TOKEN")
 CHAT_ID = get_env_var("CHAT_ID")
-LOGIN_USERNAME = get_env_var("USERNAME")
-LOGIN_PASSWORD = get_env_var("PASSWORD")
+LOGIN_USERNAME = get_env_var("LOGIN_USERNAME")
+LOGIN_PASSWORD = get_env_var("LOGIN_PASSWORD")
 LOGIN_URL = get_env_var("LOGIN_URL")
 TICKET_URL = get_env_var("TICKET_URL")
 
@@ -40,8 +40,8 @@ def check_new_tickets():
 
     # Login
     session.post(LOGIN_URL, data={
-         "username": LOGIN_USERNAME,
-    "password": LOGIN_PASSWORD
+        "username": LOGIN_USERNAME,
+        "password": LOGIN_PASSWORD
     })
 
     response = session.get(TICKET_URL)
