@@ -4,26 +4,40 @@ import os
 from bs4 import BeautifulSoup
 from threading import Timer
 
-# Recupera token e chat ID dalle variabili ambiente
-TOKEN = os.environ["BOT_TOKEN"]
-CHAT_ID = os.environ["CHAT_ID"]
-LOGIN_USERNAME = os.environ["LOGIN_USERNAME"]
-LOGIN_PASSWORD = os.environ["LOGIN_PASSWORD"]
+# Recupera e verifica le variabili d'ambiente
+def get_env_var(key):
+    value = os.environ.get(key)
+    if not value:
+        print(f"❌ Variabile d'ambiente mancante: {key}")
+        exit(1)
+    return value
 
+# Variabili d’ambiente obbligatorie
+TOKEN = get_env_var("BOT_TOKEN")
+CHAT_ID = get_env_var("CHAT_ID")
+LOGIN_USERNAME = get_env_var("LOGIN_USERNAME")
+LOGIN_PASSWORD = get_env_var("LOGIN_PASSWORD")
+
+# Impostazioni
 sent_tickets = {}
-TICKET_CHECK_INTERVAL = 60  # secondi
-REMINDER_INTERVAL = 60      # secondi
-FIRST_REMINDER_AFTER = 900  # 15 minuti
+TICKET_CHECK_INTERVAL = 60   # Ogni 60 secondi
+REMINDER_INTERVAL = 60       # Ogni 60 secondi dopo il primo
+FIRST_REMINDER_AFTER = 900   # Primo promemoria dopo 15 minuti
 
+# Funzione per inviare messaggi Telegram
 def send_message(text):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    requests.post(url, data={"chat_id": CHAT_ID, "text": text})
+    try:
+        requests.post(url, data={"chat_id": CHAT_ID, "text": text})
+    except Exception as e:
+        print(f"Errore nell'invio del messaggio Telegram: {e}")
 
+# Funzione per controllare nuovi ticket
 def check_new_tickets():
     url = "https://ynap.kappa3.app/home/ticketing"
     session = requests.Session()
 
-    # Effettua login
+    # Login
     login_url = "https://ynap.kappa3.app/login"
     session.post(login_url, data={
         "username": LOGIN_USERNAME,
@@ -50,17 +64,20 @@ def check_new_tickets():
             send_message(f"🆕 Nuovo ticket #{ticket_id}\n{subject}\n{link}")
             Timer(FIRST_REMINDER_AFTER, send_reminder, args=[ticket_id, subject, link]).start()
 
+# Funzione promemoria periodico
 def send_reminder(ticket_id, subject, link):
     if sent_tickets.get(ticket_id) is False:
         send_message(f"⏰ Promemoria: il ticket #{ticket_id} non è stato risolto.\n{subject}\n{link}")
         Timer(REMINDER_INTERVAL, send_reminder, args=[ticket_id, subject, link]).start()
 
+# Main loop
 def main():
+    send_message("✅ Bot avviato con successo e in ascolto.")
     while True:
         try:
             check_new_tickets()
         except Exception as e:
-            send_message(f"Errore: {e}")
+            send_message(f"⚠️ Errore durante il controllo ticket:\n{e}")
         time.sleep(TICKET_CHECK_INTERVAL)
 
 if __name__ == "__main__":
