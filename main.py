@@ -1,11 +1,14 @@
 import time
-import os
 import requests
+import os
 from bs4 import BeautifulSoup
 from threading import Timer
 
-TOKEN = "7849103119:AAErLG-ekv-a3VEoMGtwzsqWcd_G8vMyaAw"
-CHAT_ID = "7900732843"
+# Recupera token e chat ID dalle variabili ambiente
+TOKEN = os.environ["BOT_TOKEN"]
+CHAT_ID = os.environ["CHAT_ID"]
+LOGIN_USERNAME = os.environ["LOGIN_USERNAME"]
+LOGIN_PASSWORD = os.environ["LOGIN_PASSWORD"]
 
 sent_tickets = {}
 TICKET_CHECK_INTERVAL = 60  # secondi
@@ -19,8 +22,13 @@ def send_message(text):
 def check_new_tickets():
     url = "https://ynap.kappa3.app/home/ticketing"
     session = requests.Session()
-    #Inserire qui le credenziali se richiesto login
-     session.post("https://ynap.kappa3.app/login", data={"username": "davide.castellano@255.it", "password": "davipi04"})
+
+    # Effettua login
+    login_url = "https://ynap.kappa3.app/login"
+    session.post(login_url, data={
+        "username": LOGIN_USERNAME,
+        "password": LOGIN_PASSWORD
+    })
 
     response = session.get(url)
     soup = BeautifulSoup(response.text, "html.parser")
@@ -48,7 +56,6 @@ def send_reminder(ticket_id, subject, link):
         Timer(REMINDER_INTERVAL, send_reminder, args=[ticket_id, subject, link]).start()
 
 def main():
-    send_message("✅ Bot avviato correttamente!")
     while True:
         try:
             check_new_tickets()
