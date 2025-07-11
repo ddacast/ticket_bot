@@ -19,7 +19,7 @@ def send_message(text):
 def check_new_tickets():
     url = "https://ynap.kappa3.app/home/ticketing"
     session = requests.Session()
-     Inserire qui le credenziali se richiesto login
+    #Inserire qui le credenziali se richiesto login
      session.post("https://ynap.kappa3.app/login", data={"username": "davide.castellano@255.it", "password": "davipi04"})
 
     response = session.get(url)
