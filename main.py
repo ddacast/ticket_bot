@@ -12,17 +12,17 @@ def get_env_var(key):
         exit(1)
     return value
 
-# Variabili d’ambiente obbligatorie
+# Variabili d’ambiente
 TOKEN = get_env_var("BOT_TOKEN")
 CHAT_ID = get_env_var("CHAT_ID")
-LOGIN_USERNAME = get_env_var("LOGIN_USERNAME")
-LOGIN_PASSWORD = get_env_var("LOGIN_PASSWORD")
+LOGIN_USERNAME = get_env_var("USERNAME")
+LOGIN_PASSWORD = get_env_var("PASSWORD")
 
 # Impostazioni
 sent_tickets = {}
-TICKET_CHECK_INTERVAL = 60   # Ogni 60 secondi
-REMINDER_INTERVAL = 60       # Ogni 60 secondi dopo il primo
-FIRST_REMINDER_AFTER = 900   # Primo promemoria dopo 15 minuti
+TICKET_CHECK_INTERVAL = 60   # ogni 60 secondi
+REMINDER_INTERVAL = 60       # ogni 60 secondi dopo il primo
+FIRST_REMINDER_AFTER = 900   # primo promemoria dopo 15 minuti
 
 # Funzione per inviare messaggi Telegram
 def send_message(text):
