@@ -1,12 +1,13 @@
 def ticket_exists(session, ticket_id):
     detail_url = f"{DETAIL_URL_BASE}{ticket_id}"
     r = session.get(detail_url)
+    
     if "Ticket non trovato" in r.text or r.status_code != 200:
         return None
 
     soup = BeautifulSoup(r.text, "html.parser")
 
-    # TAG CORRETTI
+    # Usa i selettori giusti per soggetto e stato
     subject_tag = soup.select_one("div.ticket-data h4")
     status_tag = soup.select_one("span.tkt-status")
 
