@@ -15,8 +15,10 @@ def get_env_var(key):
 # Variabili d’ambiente
 TOKEN = get_env_var("BOT_TOKEN")
 CHAT_ID = get_env_var("CHAT_ID")
-LOGIN_USERNAME = get_env_var("USERNAME")
-LOGIN_PASSWORD = get_env_var("PASSWORD")
+LOGIN_USERNAME = get_env_var("LOGIN_USERNAME")
+LOGIN_PASSWORD = get_env_var("LOGIN_PASSWORD")
+LOGIN_URL = get_env_var("LOGIN_URL")
+TICKET_URL = get_env_var("TICKET_URL")
 
 # Impostazioni
 sent_tickets = {}
@@ -34,17 +36,15 @@ def send_message(text):
 
 # Funzione per controllare nuovi ticket
 def check_new_tickets():
-    url = "https://ynap.kappa3.app/home/ticketing"
     session = requests.Session()
 
     # Login
-    login_url = "https://ynap.kappa3.app/login"
-    session.post(login_url, data={
+    session.post(LOGIN_URL, data={
         "username": LOGIN_USERNAME,
         "password": LOGIN_PASSWORD
     })
 
-    response = session.get(url)
+    response = session.get(TICKET_URL)
     soup = BeautifulSoup(response.text, "html.parser")
 
     for row in soup.select("table.tkt-table tr"):
