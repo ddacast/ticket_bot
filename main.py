@@ -40,8 +40,8 @@ def check_new_tickets():
 
     # Login
     session.post(LOGIN_URL, data={
-        "username": USERNAME,
-        "password": PASSWORD
+         "username": LOGIN_USERNAME,
+    "password": LOGIN_PASSWORD
     })
 
     response = session.get(TICKET_URL)
