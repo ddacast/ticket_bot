@@ -3,88 +3,83 @@ import time
 import requests
 from bs4 import BeautifulSoup
 
-# Recupera le variabili d'ambiente
-def get_env_var(key):
+# Funzione di utilità per caricare variabili d'ambiente
+def get_env_var(key, default=None):
     value = os.environ.get(key)
-    if not value:
+    if not value and default is None:
         print(f"❌ Variabile d'ambiente mancante: {key}")
         exit(1)
-    return value
+    return value or default
 
-# Config
+# Variabili d’ambiente
 TOKEN = get_env_var("BOT_TOKEN")
 CHAT_ID = get_env_var("CHAT_ID")
-USERNAME = get_env_var("USERNAME")
-PASSWORD = get_env_var("PASSWORD")
-LOGIN_URL = get_env_var("LOGIN_URL")  # https://ynap.kappa3.app/login
-DETAIL_BASE_URL = get_env_var("DETAIL_BASE_URL")  # https://ynap.kappa3.app/home/ticketing/ticket/detail?id=
+LOGIN_USERNAME = get_env_var("USERNAME")
+LOGIN_PASSWORD = get_env_var("PASSWORD")
+LOGIN_URL = get_env_var("LOGIN_URL")
+DETAIL_URL_TEMPLATE = get_env_var("DETAIL_URL_TEMPLATE", "https://ynap.kappa3.app/home/ticketing/ticket/detail?id={id}")
+START_ID = int(get_env_var("START_ID", "21950"))  # fallback se non è presente
 
-CHECK_INTERVAL = 60  # secondi
-REMINDER_INTERVAL = 900  # 15 minuti
-
-# Salva i ticket non risolti per reminder
-unresolved = {}
+# Variabili interne
+sent_tickets = set()
+current_id = START_ID
 
 # Invia messaggio Telegram
 def send_message(text):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    requests.post(url, data={"chat_id": CHAT_ID, "text": text})
+    try:
+        requests.post(url, data={"chat_id": CHAT_ID, "text": text})
+    except Exception as e:
+        print(f"Errore invio messaggio Telegram: {e}")
 
-# Estrai e invia dettagli ticket
-def check_ticket(session, ticket_id):
-    url = f"{DETAIL_BASE_URL}{ticket_id}"
-    resp = session.get(url)
+# Login e sessione
+def get_logged_session():
+    session = requests.Session()
+    session.post(LOGIN_URL, data={
+        "username": LOGIN_USERNAME,
+        "password": LOGIN_PASSWORD
+    })
+    return session
 
-    if resp.status_code != 200:
-        return False  # Ticket non esiste
+# Estrai dettagli ticket da ID
+def process_ticket(session, ticket_id):
+    url = DETAIL_URL_TEMPLATE.format(id=ticket_id)
+    response = session.get(url)
 
-    soup = BeautifulSoup(resp.text, "html.parser")
-    titolo = soup.select_one("div.card-body h5")
-    stato = soup.find(string="Stato:")  # cerca label
-    if not titolo or not stato:
-        return False
+    if response.status_code != 200:
+        print(f"[{ticket_id}] ❌ Ticket non trovato (HTTP {response.status_code})")
+        return
 
-    stato_text = stato.find_parent().text.strip().lower()
-    if "risolto" in stato_text:
-        return True
+    soup = BeautifulSoup(response.text, "html.parser")
 
-    # Estrai info
-    subject = titolo.text.strip()
-    text = f"🆕 Ticket #{ticket_id}\n📌 {subject}\n🔗 {url}"
-    send_message(text)
-    unresolved[ticket_id] = {"subject": subject, "url": url, "time": time.time()}
-    return True
+    # Estrai dati con fallback
+    subject = soup.select_one("h5 strong")
+    subject_text = subject.text.strip() if subject else "(Nessun oggetto)"
 
-# Promemoria per i ticket non risolti
-def send_reminders():
-    now = time.time()
-    for tid, data in unresolved.items():
-        if now - data["time"] > REMINDER_INTERVAL:
-            send_message(f"⏰ Promemoria: il ticket #{tid} non è ancora risolto.\n{data['subject']}\n{data['url']}")
-            data["time"] = now
+    status = soup.select_one(".status-text")
+    status_text = status.text.strip().lower() if status else "(stato non trovato)"
+
+    print(f"[{ticket_id}] Stato: {status_text} - Oggetto: {subject_text}")
+
+    if "risolto" not in status_text and ticket_id not in sent_tickets:
+        sent_tickets.add(ticket_id)
+        send_message(f"🆕 Nuovo ticket #{ticket_id}\n{subject_text}\n{url}")
 
 # Loop principale
 def main():
-    session = requests.Session()
-    session.post(LOGIN_URL, data={"username": USERNAME, "password": PASSWORD})
+    global current_id
+    send_message("✅ Bot avviato con successo e in ascolto.")
 
-    send_message("✅ Bot partito, controllo ticket per ID incrementale...")
-
-    last_checked_id = int(os.environ.get("START_ID", "21950"))
+    session = get_logged_session()
 
     while True:
         try:
-            found = check_ticket(session, last_checked_id)
-            if found:
-                last_checked_id += 1
-            else:
-                # Se non esiste o non valido, riprova tra un po'
-                time.sleep(CHECK_INTERVAL)
-
-            send_reminders()
+            process_ticket(session, current_id)
+            current_id += 1
         except Exception as e:
-            send_message(f"⚠️ Errore: {e}")
-            time.sleep(10)
+            send_message(f"⚠️ Errore su ticket #{current_id}:\n{e}")
+            current_id += 1
+        time.sleep(5)
 
 if __name__ == "__main__":
     main()
