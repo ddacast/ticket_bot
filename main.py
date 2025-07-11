@@ -1,4 +1,3 @@
-
 import time
 import requests
 from bs4 import BeautifulSoup
@@ -48,6 +47,7 @@ def send_reminder(ticket_id, subject, link):
         Timer(REMINDER_INTERVAL, send_reminder, args=[ticket_id, subject, link]).start()
 
 def main():
+    send_message("✅ Bot avviato correttamente!")
     while True:
         try:
             check_new_tickets()
