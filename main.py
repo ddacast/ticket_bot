@@ -16,7 +16,7 @@ DETAIL_URL = "https://ynap.kappa3.app/home/ticketing/ticket/detail?id="
 # Intervalli
 CHECK_INTERVAL = 60  # ogni 60 secondi
 STATUS_LOG_FILE = "ticket_status_log.json"
-CHECK_RANGE = 100
+CHECK_RANGE = 20
 LOCK_FILE = "/tmp/ticket_bot.lock"
 
 
