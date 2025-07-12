@@ -101,8 +101,13 @@ def main():
     print(f"[DEBUG] Login status code: {login_response.status_code}")
     redirect_location = login_response.headers.get("Location", "")
     print(f"[DEBUG] Redirected to: {redirect_location}")
-    login_successful = redirect_location.startswith("/home") or "home" in redirect_location
+
+    login_successful = ("/home" in redirect_location and "sign-in" not in redirect_location) or redirect_location == "/home"
     print(f"[DEBUG] Login successful: {login_successful}")
+
+    if not login_successful:
+        print("[ERROR] Login fallito. Controlla credenziali o URL di login.")
+        return
 
     current_id = int(os.environ.get("START_ID", 21900))
 
