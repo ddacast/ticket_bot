@@ -43,24 +43,23 @@ def parse_ticket_detail(html):
         if not label_div or not value_div:
             continue
         label = label_div.get_text(strip=True).lower()
-        value = value_div.get_text(strip=True)
 
         if "area" in label:
-            details["area"] = value
+            details["area"] = value_div.get_text(strip=True)
         elif "priorit" in label:
             selected = value_div.find("option", selected=True)
-            details["priorità"] = selected.text.strip() if selected else value
+            details["priorità"] = selected.text.strip() if selected else value_div.get_text(strip=True)
         elif "stato" in label:
             selected = value_div.find("option", selected=True)
-            stato = selected.text.strip() if selected else value
+            stato = selected.text.strip() if selected else value_div.get_text(strip=True)
             details["stato"] = stato
             details["stato_attuale"] = stato
         elif "agente" in label:
             selected = value_div.find("option", selected=True)
-            details["agente"] = selected.text.strip() if selected else value
+            details["agente"] = selected.text.strip() if selected else value_div.get_text(strip=True)
         elif "macchina" in label:
             selected = value_div.find("option", selected=True)
-            details["macchina"] = selected.text.strip() if selected else value
+            details["macchina"] = selected.text.strip() if selected else value_div.get_text(strip=True)
 
     return details
 
@@ -142,7 +141,8 @@ def main():
         print("[ERROR] Login fallito. Controlla credenziali o URL di login.")
         return
 
-    current_id = int(os.environ.get("START_ID", 21900))
+    # Imposta ID iniziale da cui partire
+    current_id = 21958
 
     while True:
         check_ticket(session, current_id)
