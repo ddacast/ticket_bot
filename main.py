@@ -1,49 +1,52 @@
+import os
 import time
 import requests
-import os
 from bs4 import BeautifulSoup
 
-# Recupera e verifica le variabili d'ambiente
-def get_env_var(key):
-    value = os.environ.get(key)
-    if not value:
-        print(f"❌ Variabile d'ambiente mancante: {key}")
-        exit(1)
-    return value
+TOKEN = os.environ["BOT_TOKEN"]
+CHAT_ID = os.environ["CHAT_ID"]
+LOGIN_USERNAME = os.environ["LOGIN_USERNAME"]
+LOGIN_PASSWORD = os.environ["LOGIN_PASSWORD"]
 
-# Variabili d’ambiente
-BOT_TOKEN = get_env_var("BOT_TOKEN")
-CHAT_ID = get_env_var("CHAT_ID")
-LOGIN_USERNAME = get_env_var("USERNAME")
-LOGIN_PASSWORD = get_env_var("PASSWORD")
-LOGIN_URL = get_env_var("LOGIN_URL")
-TICKET_BASE_URL = "https://ynap.kappa3.app/home/ticketing/ticket/detail?id="
+LOGIN_URL = "https://ynap.kappa3.app/login"
+BASE_URL = "https://ynap.kappa3.app/home/ticketing/ticket/detail?id="
 
-# Inizio da ID (da modificare se necessario)
-current_id = 21954
 
-# Funzione invio messaggi Telegram
 def send_message(text):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     try:
-        requests.post(url, data={"chat_id": CHAT_ID, "text": text})
+        response = requests.post(url, data={"chat_id": CHAT_ID, "text": text})
+        print(f"[DEBUG] Telegram response: {response.status_code}")
     except Exception as e:
-        print(f"[ERROR] Telegram message failed: {e}")
+        print(f"[ERROR] Telegram send failed: {e}")
 
-# Funzione parsing ticket
+
 def parse_ticket(html):
     soup = BeautifulSoup(html, "html.parser")
-    get_right = lambda icon: soup.find("i", class_=icon).find_parent().find_next_sibling().text.strip()
 
-    try:
-        area = get_right("fa-briefcase")
-        priority = soup.find("select", {"id": "ch_priority"}).find("option", selected=True).text.strip()
-        status = soup.find("select", {"id": "ch_status"}).find("option", selected=True).text.strip()
-        agent = soup.find("select", {"id": "ch_agent"}).find("option", selected=True).text.strip()
-        machine = soup.find("select", {"id": "ch_device"}).find("option", selected=True).text.strip()
-    except Exception as e:
-        print(f"[DEBUG] Errore parsing dettagli: {e}")
-        return None
+    def find_detail(label_text):
+        rows = soup.select(".row.listdetail")
+        for row in rows:
+            label_div = row.select_one(".col-md-5")
+            if label_div and label_div.text.strip().lower().startswith(label_text.lower()):
+                value_div = row.select_one(".col-md-7, .col-md-6")
+                if value_div:
+                    select = value_div.find("select")
+                    if select:
+                        selected_option = select.find("option", selected=True)
+                        if selected_option:
+                            return selected_option.text.strip()
+                    else:
+                        return value_div.text.strip()
+        return "Non disponibile"
+
+    area = find_detail("Area:")
+    priority = find_detail("Priority:")
+    status = find_detail("Stato:")
+    agent = find_detail("Agente:")
+    machine = find_detail("Macchina:")
+
+    print(f"[DEBUG] Estratti dettagli: area={area}, priorità={priority}, stato={status}, agente={agent}, macchina={machine}")
 
     return {
         "area": area,
@@ -53,43 +56,59 @@ def parse_ticket(html):
         "machine": machine
     }
 
-# Funzione principale
+
 def main():
-    print("🤖 Bot avviato e in ascolto...")
+    print("\n🤖 Bot avviato e in ascolto...\n")
 
-    session = requests.Session()
-    session.post(LOGIN_URL, data={"username": LOGIN_USERNAME, "password": LOGIN_PASSWORD})
+    ticket_id = int(os.environ.get("START_ID", 1))
+    consecutive_failures = 0
+    max_failures = 20
 
-    global current_id
     while True:
-        print(f"\n[INFO] Controllo ticket ID: {current_id}")
-        url = f"{TICKET_BASE_URL}{current_id}"
+        print(f"[INFO] Controllo ticket ID: {ticket_id}")
+        url = BASE_URL + str(ticket_id)
         print(f"[DEBUG] URL: {url}")
+
         try:
-            r = session.get(url)
-            print(f"[DEBUG] Status Code: {r.status_code}")
-            if r.status_code == 200:
-                data = parse_ticket(r.text)
-                if data and data["status"].lower() not in ["risolto", "chiuso"]:
+            session = requests.Session()
+            login_payload = {"username": LOGIN_USERNAME, "password": LOGIN_PASSWORD}
+            session.post(LOGIN_URL, data=login_payload)
+
+            res = session.get(url)
+            print(f"[DEBUG] Status Code: {res.status_code}")
+
+            if res.status_code == 200:
+                parsed = parse_ticket(res.text)
+                if parsed["status"] in ["Risolto", "Chiuso"] or parsed["status"] == "Non disponibile":
+                    print(f"[{ticket_id}] ⚠️ Ticket ignorato (risolto/chiuso o parsing fallito)\n")
+                    consecutive_failures += 1
+                else:
                     msg = (
-                        f"🆕 Ticket #{current_id}\n"
-                        f"🔹 Area: {data['area']}\n"
-                        f"🔸 Priorità: {data['priority']}\n"
-                        f"📌 Stato: {data['status']}\n"
-                        f"👤 Agente: {data['agent']}\n"
-                        f"🖥️ Macchina: {data['machine']}\n"
+                        f"📩 Ticket #{ticket_id}\n"
+                        f"📍 Area: {parsed['area']}\n"
+                        f"⚙️ Macchina: {parsed['machine']}\n"
+                        f"👤 Agente: {parsed['agent']}\n"
+                        f"🚦 Stato: {parsed['status']}\n"
+                        f"❗ Priorità: {parsed['priority']}\n"
                         f"🔗 {url}"
                     )
                     send_message(msg)
-                else:
-                    print(f"[{current_id}] ⚠️ Ticket ignorato (risolto/chiuso o parsing fallito)")
+                    consecutive_failures = 0
             else:
-                print(f"[{current_id}] ⚠️ Ticket non esistente o accesso negato")
-        except Exception as e:
-            print(f"[ERROR] Errore durante richiesta per ticket {current_id}: {e}")
+                print(f"[DEBUG] Ticket {ticket_id} non trovato (HTTP {res.status_code})\n")
+                consecutive_failures += 1
 
-        current_id += 1
-        time.sleep(5)  # Evita flood, puoi aumentare
+        except Exception as e:
+            print(f"[ERROR] Errore durante il controllo del ticket {ticket_id}: {e}")
+            consecutive_failures += 1
+
+        if consecutive_failures >= max_failures:
+            print(f"[STOP] Raggiunto limite massimo di {max_failures} fallimenti consecutivi. Termino.")
+            break
+
+        ticket_id += 1
+        time.sleep(1)
+
 
 if __name__ == "__main__":
     main()
