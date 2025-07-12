@@ -2,7 +2,6 @@ import time
 import os
 import requests
 from bs4 import BeautifulSoup
-from threading import Timer
 import json
 
 # Config
@@ -15,12 +14,9 @@ DETAIL_URL = "https://ynap.kappa3.app/home/ticketing/ticket/detail?id="
 
 # Intervalli
 CHECK_INTERVAL = 60  # ogni 60 secondi
-FIRST_REMINDER_AFTER = 60  # 1 minuto
-REMINDER_INTERVAL = 60  # 1 minuto
-
-pending_reminders = {}
 STATUS_LOG_FILE = "ticket_status_log.json"
 CHECK_RANGE = 100
+
 
 def send_message(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
@@ -29,21 +25,25 @@ def send_message(text):
     except Exception as e:
         print(f"[ERROR] Telegram: {e}")
 
+
 def load_status_log():
     if os.path.exists(STATUS_LOG_FILE):
         with open(STATUS_LOG_FILE, "r") as f:
             return json.load(f)
     return {}
 
+
 def save_status_log(data):
     with open(STATUS_LOG_FILE, "w") as f:
         json.dump(data, f)
 
+
 status_log = load_status_log()
 
-def get_ticket_state_only(html):
+
+def get_ticket_state(html):
     soup = BeautifulSoup(html, "html.parser")
-    stato = "Non disponibile"
+    stato = "non disponibile"
     for row in soup.find_all("div", class_="row listdetail"):
         label_div = row.find("div", class_="col-md-5") or row.find("div", class_="col-md-6")
         value_div = row.find("div", class_="col-md-7") or row.find("div", class_="col-md-6")
@@ -56,15 +56,15 @@ def get_ticket_state_only(html):
             break
     return stato
 
-def parse_ticket_detail(html):
+
+def parse_full_details(html):
     soup = BeautifulSoup(html, "html.parser")
     details = {
         "area": "Non disponibile",
         "priorità": "Non disponibile",
         "stato": "Non disponibile",
         "agente": "Non disponibile",
-        "macchina": "Non disponibile",
-        "stato_attuale": "Non disponibile"
+        "macchina": "Non disponibile"
     }
 
     for row in soup.find_all("div", class_="row listdetail"):
@@ -83,7 +83,6 @@ def parse_ticket_detail(html):
             selected = value_div.find("option", selected=True)
             stato = selected.text.strip() if selected else value_div.get_text(strip=True)
             details["stato"] = stato
-            details["stato_attuale"] = stato
         elif "agente" in label:
             selected = value_div.find("option", selected=True)
             details["agente"] = selected.text.strip() if selected else value_div.get_text(strip=True)
@@ -92,6 +91,7 @@ def parse_ticket_detail(html):
             details["macchina"] = selected.text.strip() if selected else value_div.get_text(strip=True)
 
     return details
+
 
 def check_ticket(session, ticket_id):
     print(f"\n[INFO] Controllo ticket ID: {ticket_id}")
@@ -102,66 +102,36 @@ def check_ticket(session, ticket_id):
             print(f"[{ticket_id}] ❌ Ticket non valido o non trovato.")
             return False
 
-        stato = get_ticket_state_only(response.text)
-        entry = status_log.get(str(ticket_id), {})
-        stato_prec = entry.get("current")
-        stato_notificato = entry.get("notified", "")
+        stato = get_ticket_state(response.text)
+        stato_prec = status_log.get(str(ticket_id), "")
 
-        if stato_prec and stato_prec != stato:
+        if stato != stato_prec:
             print(f"[DEBUG] Stato del ticket {ticket_id} cambiato da '{stato_prec}' a '{stato}'")
-            send_message(f"ℹ️ Ticket #{ticket_id} passato da '{stato_prec}' a '{stato}'")
+            if stato_prec:
+                send_message(f"ℹ️ Ticket #{ticket_id} passato da '{stato_prec}' a '{stato}'")
+            status_log[str(ticket_id)] = stato
+            save_status_log(status_log)
 
-        status_log[str(ticket_id)] = {"current": stato, "notified": stato_notificato}
-
-        if stato == "nuovo" and stato_notificato != "nuovo":
-            details = parse_ticket_detail(response.text)
+        if stato == "nuovo":
+            details = parse_full_details(response.text)
             subject = f"📌 Ticket #{ticket_id}"
-            link = url
-            message = f"{subject}\nArea: {details['area']}\nPriorità: {details['priorità']}\nStato: {details['stato']}\nAgente: {details['agente']}\nMacchina: {details['macchina']}\n🔗 {link}"
-
+            message = (
+                f"{subject}\n"
+                f"Area: {details['area']}\n"
+                f"Priorità: {details['priorità']}\n"
+                f"Stato: {details['stato']}\n"
+                f"Agente: {details['agente']}\n"
+                f"Macchina: {details['macchina']}\n"
+                f"🔗 {url}"
+            )
             send_message(message)
-            send_message(f"🕐 Ticket #{ticket_id} impostato a 'nuovo', promemoria programmato.")
-            timer = Timer(FIRST_REMINDER_AFTER, send_reminder, args=[ticket_id, message])
-            timer.start()
-            pending_reminders[ticket_id] = timer
-            status_log[str(ticket_id)]["notified"] = "nuovo"
 
-        elif stato != "nuovo":
-            if ticket_id in pending_reminders:
-                pending_reminders[ticket_id].cancel()
-                del pending_reminders[ticket_id]
-                send_message(f"🚫 Ticket #{ticket_id} non è più 'nuovo'. Promemoria disattivato.")
-            status_log[str(ticket_id)]["notified"] = stato
-
-        save_status_log(status_log)
         return True
 
     except Exception as e:
         print(f"[ERROR] ticket {ticket_id}: {e}")
         return False
 
-def send_reminder(ticket_id, message):
-    url = DETAIL_URL + str(ticket_id)
-    session = requests.Session()
-    try:
-        response = session.get(url)
-        if response.status_code != 200 or "Dettagli" not in response.text:
-            print(f"[REMINDER] Ticket {ticket_id} non trovato o pagina non valida.")
-            return
-
-        stato_corrente = get_ticket_state_only(response.text)
-
-        if stato_corrente == "nuovo":
-            send_message(f"🔔 Promemoria ticket #{ticket_id} ancora da prendere in carico.\n{message}")
-            timer = Timer(REMINDER_INTERVAL, send_reminder, args=[ticket_id, message])
-            timer.start()
-            pending_reminders[ticket_id] = timer
-        else:
-            if ticket_id in pending_reminders:
-                del pending_reminders[ticket_id]
-            send_message(f"✅ Ticket #{ticket_id} ora è '{stato_corrente}'. Promemoria disattivato.")
-    except Exception as e:
-        print(f"[ERROR] Reminder check fallito per ticket {ticket_id}: {e}")
 
 def is_already_running():
     import socket
@@ -172,12 +142,12 @@ def is_already_running():
     except socket.error:
         return True
 
+
 def main():
     if is_already_running():
         print("\n⚠️ Il bot è già in esecuzione. Uscita.\n")
         return
 
-    print(f"[DEBUG] Process PID: {os.getpid()}")
     print("\n🤖 Bot avviato e in ascolto...\n")
     send_message("🤖 Bot avviato e in ascolto...")
 
@@ -219,6 +189,7 @@ def main():
             check_ticket(session, tid)
         current_id += 1
         time.sleep(CHECK_INTERVAL)
+
 
 if __name__ == "__main__":
     main()
