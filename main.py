@@ -1,133 +1,112 @@
 import time
-import requests
 import os
+import requests
 from bs4 import BeautifulSoup
 from threading import Timer
 
-# Recupera e verifica le variabili d'ambiente
-def get_env_var(key):
-    value = os.environ.get(key)
-    if not value:
-        print(f"❌ Variabile d'ambiente mancante: {key}")
-        exit(1)
-    return value
+# Config
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+CHAT_ID = os.environ.get("CHAT_ID")
+USERNAME = os.environ.get("USERNAME")
+PASSWORD = os.environ.get("PASSWORD")
+LOGIN_URL = os.environ.get("LOGIN_URL")
+DETAIL_URL = "https://ynap.kappa3.app/home/ticketing/ticket/detail?id="
 
-# Variabili d'ambiente
-TOKEN = get_env_var("BOT_TOKEN")
-CHAT_ID = get_env_var("CHAT_ID")
-LOGIN_USERNAME = get_env_var("USERNAME")
-LOGIN_PASSWORD = get_env_var("PASSWORD")
-LOGIN_URL = get_env_var("LOGIN_URL")
-DETAIL_URL = get_env_var("DETAIL_URL")  # es: https://ynap.kappa3.app/home/ticketing/ticket/detail?id=
-
-# Impostazioni
-TICKET_CHECK_INTERVAL = 60  # secondi
-REMINDER_INTERVAL = 60
-FIRST_REMINDER_AFTER = 900
+# Intervalli
+CHECK_INTERVAL = 60  # ogni 60 secondi
+FIRST_REMINDER_AFTER = 900  # 15 minuti
+REMINDER_INTERVAL = 600  # 10 minuti
 
 sent_tickets = {}
-current_id = int(os.environ.get("START_ID", 21954))
-
-# Telegram
 
 def send_message(text):
-    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     try:
         requests.post(url, data={"chat_id": CHAT_ID, "text": text})
     except Exception as e:
-        print(f"[ERROR] Invio messaggio Telegram: {e}")
+        print(f"[ERROR] Telegram: {e}")
 
-# Login
+def parse_ticket_detail(html):
+    soup = BeautifulSoup(html, "html.parser")
+    details = {}
 
-def login():
-    session = requests.Session()
-    session.post(LOGIN_URL, data={
-        "username": LOGIN_USERNAME,
-        "password": LOGIN_PASSWORD
-    })
-    return session
-
-# Parsing dettagli ticket
-
-def parse_ticket_details(soup):
-    def estrai_dropdown_valore(id_):
-        dropdown = soup.select_one(f'select#{id_} option[selected]')
-        return dropdown.text.strip() if dropdown else "Non disponibile"
-
-    def estrai_testuale(etichetta):
-        rows = soup.select("div.row.listdetail")
-        for row in rows:
-            label = row.select_one("div.col-md-5")
-            value = row.select_one("div.col-md-7")
-            if label and etichetta.lower() in label.text.lower():
-                return value.text.strip() if value else "Non disponibile"
+    def get_detail(label):
+        tag = soup.find("div", string=lambda s: s and label in s)
+        if tag:
+            sibling = tag.find_next_sibling("div")
+            return sibling.text.strip() if sibling else "Non disponibile"
         return "Non disponibile"
 
-    area = estrai_testuale("Area")
-    priorita = estrai_dropdown_valore("ch_priority")
-    stato = estrai_dropdown_valore("ch_status")
-    agente = estrai_dropdown_valore("ch_agent")
-    macchina = estrai_dropdown_valore("ch_device")
+    details["area"] = get_detail("Area")
+    details["priorità"] = get_detail("Priority")
+    details["stato"] = get_detail("Stato")
+    details["agente"] = get_detail("Agente")
+    details["macchina"] = get_detail("Macchina")
 
-    return area, priorita, stato, agente, macchina
+    timeline = soup.select("div#timeline p")
+    commenti = [p.text.strip() for p in timeline if "Nuovo commento" in p.text]
+    cambi_stato = [p.text.strip() for p in timeline if "modifica stato" in p.text]
 
-# Controllo ticket
+    details["stato_attuale"] = details["stato"]
+
+    return details
 
 def check_ticket(session, ticket_id):
-    url = f"{DETAIL_URL}{ticket_id}"
-    print(f"[INFO] Controllo ticket ID: {ticket_id}")
+    print(f"\n[INFO] Controllo ticket ID: {ticket_id}")
+    url = DETAIL_URL + str(ticket_id)
     print(f"[DEBUG] URL: {url}")
-
     try:
         response = session.get(url)
         print(f"[DEBUG] Status Code: {response.status_code}")
-        if response.status_code != 200:
-            return False
+        print(f"[DEBUG] Response length: {len(response.text)}")
 
-        soup = BeautifulSoup(response.text, "html.parser")
-        area, priorita, stato, agente, macchina = parse_ticket_details(soup)
+        if response.status_code != 200 or "Dettagli" not in response.text:
+            print(f"[{ticket_id}] ❌ Ticket non valido o non trovato.")
+            return
 
-        print(f"[DEBUG] Estratti dettagli: area={area}, priorita={priorita}, stato={stato}, agente={agente}, macchina={macchina}")
+        details = parse_ticket_detail(response.text)
+        print(f"[DEBUG] Estratti dettagli: {details}")
 
-        if stato.lower() in ["risolto", "chiuso"]:
-            return False
+        stato = details["stato_attuale"].lower()
+        if "risolto" in stato or "chiuso" in stato:
+            print(f"[{ticket_id}] ✅ Ticket risolto o chiuso.")
+            return
 
-        if stato.lower() not in ["nuovo", "in lavorazione"]:
-            print(f"[{ticket_id}] ⚠️ Ticket ignorato (stato non gestito)")
-            return False
+        subject = f"📌 Ticket #{ticket_id}"
+        link = url
+        message = f"{subject}\nArea: {details['area']}\nPriorità: {details['priorità']}\nStato: {details['stato']}\nAgente: {details['agente']}\nMacchina: {details['macchina']}\n🔗 {link}"
 
-        if ticket_id not in sent_tickets:
-            link = f"{DETAIL_URL}{ticket_id}"
-            msg = f"🆕 Nuovo Ticket #{ticket_id}\nArea: {area}\nPriorità: {priorita}\nStato: {stato}\nAgente: {agente}\nMacchina: {macchina}\n{link}"
-            send_message(msg)
-            sent_tickets[ticket_id] = False
-            Timer(FIRST_REMINDER_AFTER, send_reminder, args=[ticket_id, msg]).start()
-            return True
+        send_message(message)
+        sent_tickets[ticket_id] = stato
+
+        if stato == "nuovo":
+            print(f"[{ticket_id}] ⏰ Ticket in attesa, promemoria programmato.")
+            Timer(FIRST_REMINDER_AFTER, send_reminder, args=[ticket_id, message]).start()
 
     except Exception as e:
-        print(f"[DEBUG] Errore parsing dettagli: {e}")
-        print(f"[{ticket_id}] ⚠️ Ticket ignorato (risolto/chiuso o parsing fallito)")
+        print(f"[ERROR] ticket {ticket_id}: {e}")
 
-    return False
-
-# Promemoria
-
-def send_reminder(ticket_id, msg):
-    if sent_tickets.get(ticket_id) is False:
-        send_message(f"⏰ Promemoria: il ticket #{ticket_id} non risulta ancora risolto.\n{msg}")
-        Timer(REMINDER_INTERVAL, send_reminder, args=[ticket_id, msg]).start()
-
-# Main loop
+def send_reminder(ticket_id, message):
+    stato_corrente = sent_tickets.get(ticket_id)
+    if stato_corrente and stato_corrente == "nuovo":
+        send_message(f"🔔 Promemoria ticket #{ticket_id} ancora da prendere in carico.\n{message}")
+        Timer(REMINDER_INTERVAL, send_reminder, args=[ticket_id, message]).start()
 
 def main():
-    global current_id
+    print("\n🤖 Bot avviato e in ascolto...\n")
     send_message("🤖 Bot avviato e in ascolto...")
-    session = login()
+
+    session = requests.Session()
+    login_response = session.post(LOGIN_URL, data={"username": USERNAME, "password": PASSWORD})
+    print(f"[DEBUG] Login status code: {login_response.status_code}")
+    print(f"[DEBUG] Login successful: {'Dashboard' in login_response.text or login_response.status_code == 200}")
+
+    current_id = int(os.environ.get("START_ID", 21900))
 
     while True:
         check_ticket(session, current_id)
         current_id += 1
-        time.sleep(TICKET_CHECK_INTERVAL)
+        time.sleep(CHECK_INTERVAL)
 
 if __name__ == "__main__":
     main()
