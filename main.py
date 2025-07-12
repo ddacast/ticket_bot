@@ -43,10 +43,6 @@ def parse_ticket_detail(html):
     details["agente"] = get_detail("Agente")
     details["macchina"] = get_detail("Macchina")
 
-    timeline = soup.select("div#timeline p")
-    commenti = [p.text.strip() for p in timeline if "Nuovo commento" in p.text]
-    cambi_stato = [p.text.strip() for p in timeline if "modifica stato" in p.text]
-
     details["stato_attuale"] = details["stato"]
 
     return details
@@ -97,12 +93,32 @@ def main():
     send_message("🤖 Bot avviato e in ascolto...")
 
     session = requests.Session()
-    login_response = session.post(LOGIN_URL, data={"username": USERNAME, "password": PASSWORD}, allow_redirects=False)
+
+    # Prima richiesta per ottenere il token CSRF
+    login_page = session.get(LOGIN_URL)
+    soup = BeautifulSoup(login_page.text, "html.parser")
+    csrf = soup.find("input", {"name": "_csrf"})
+    csrf_token = csrf["value"] if csrf else ""
+
+    payload = {
+        "_csrf": csrf_token,
+        "LoginForm[identity]": USERNAME,
+        "LoginForm[password]": PASSWORD,
+        "LoginForm[rememberMe]": "1",
+        "login-button": "Login"
+    }
+
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Referer": LOGIN_URL
+    }
+
+    login_response = session.post(LOGIN_URL, data=payload, headers=headers, allow_redirects=False)
     print(f"[DEBUG] Login status code: {login_response.status_code}")
     redirect_location = login_response.headers.get("Location", "")
     print(f"[DEBUG] Redirected to: {redirect_location}")
 
-    login_successful = ("/home" in redirect_location and "sign-in" not in redirect_location) or redirect_location == "/home"
+    login_successful = "/home" in redirect_location and "/sign-in" not in redirect_location
     print(f"[DEBUG] Login successful: {login_successful}")
 
     if not login_successful:
