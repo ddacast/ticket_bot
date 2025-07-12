@@ -41,6 +41,21 @@ def save_status_log(data):
 
 status_log = load_status_log()
 
+def get_ticket_state_only(html):
+    soup = BeautifulSoup(html, "html.parser")
+    stato = "Non disponibile"
+    for row in soup.find_all("div", class_="row listdetail"):
+        label_div = row.find("div", class_="col-md-5") or row.find("div", class_="col-md-6")
+        value_div = row.find("div", class_="col-md-7") or row.find("div", class_="col-md-6")
+        if not label_div or not value_div:
+            continue
+        label = label_div.get_text(strip=True).lower()
+        if "stato" in label:
+            selected = value_div.find("option", selected=True)
+            stato = selected.text.strip().lower() if selected else value_div.get_text(strip=True).lower()
+            break
+    return stato
+
 def parse_ticket_detail(html):
     soup = BeautifulSoup(html, "html.parser")
     details = {
@@ -81,27 +96,16 @@ def parse_ticket_detail(html):
 def check_ticket(session, ticket_id):
     print(f"\n[INFO] Controllo ticket ID: {ticket_id}")
     url = DETAIL_URL + str(ticket_id)
-    print(f"[DEBUG] URL: {url}")
     try:
         response = session.get(url)
-        print(f"[DEBUG] Status Code: {response.status_code}")
-        print(f"[DEBUG] Response length: {len(response.text)}")
-
         if response.status_code != 200 or "Dettagli" not in response.text:
             print(f"[{ticket_id}] ❌ Ticket non valido o non trovato.")
             return False
 
-        details = parse_ticket_detail(response.text)
-        print(f"[DEBUG] Estratti dettagli: {details}")
-
-        stato = details["stato_attuale"].lower()
+        stato = get_ticket_state_only(response.text)
         entry = status_log.get(str(ticket_id), {})
         stato_prec = entry.get("current")
         stato_notificato = entry.get("notified", "")
-
-        subject = f"📌 Ticket #{ticket_id}"
-        link = url
-        message = f"{subject}\nArea: {details['area']}\nPriorità: {details['priorità']}\nStato: {details['stato']}\nAgente: {details['agente']}\nMacchina: {details['macchina']}\n🔗 {link}"
 
         if stato_prec and stato_prec != stato:
             print(f"[DEBUG] Stato del ticket {ticket_id} cambiato da '{stato_prec}' a '{stato}'")
@@ -109,7 +113,12 @@ def check_ticket(session, ticket_id):
 
         status_log[str(ticket_id)] = {"current": stato, "notified": stato_notificato}
 
-        if stato == "nuovo":
+        if stato == "nuovo" and stato_notificato != "nuovo":
+            details = parse_ticket_detail(response.text)
+            subject = f"📌 Ticket #{ticket_id}"
+            link = url
+            message = f"{subject}\nArea: {details['area']}\nPriorità: {details['priorità']}\nStato: {details['stato']}\nAgente: {details['agente']}\nMacchina: {details['macchina']}\n🔗 {link}"
+
             send_message(message)
             send_message(f"🕐 Ticket #{ticket_id} impostato a 'nuovo', promemoria programmato.")
             timer = Timer(FIRST_REMINDER_AFTER, send_reminder, args=[ticket_id, message])
@@ -117,12 +126,12 @@ def check_ticket(session, ticket_id):
             pending_reminders[ticket_id] = timer
             status_log[str(ticket_id)]["notified"] = "nuovo"
 
-        else:
+        elif stato != "nuovo":
             if ticket_id in pending_reminders:
                 pending_reminders[ticket_id].cancel()
                 del pending_reminders[ticket_id]
                 send_message(f"🚫 Ticket #{ticket_id} non è più 'nuovo'. Promemoria disattivato.")
-                status_log[str(ticket_id)]["notified"] = stato
+            status_log[str(ticket_id)]["notified"] = stato
 
         save_status_log(status_log)
         return True
@@ -140,8 +149,7 @@ def send_reminder(ticket_id, message):
             print(f"[REMINDER] Ticket {ticket_id} non trovato o pagina non valida.")
             return
 
-        details = parse_ticket_detail(response.text)
-        stato_corrente = details["stato_attuale"].lower()
+        stato_corrente = get_ticket_state_only(response.text)
 
         if stato_corrente == "nuovo":
             send_message(f"🔔 Promemoria ticket #{ticket_id} ancora da prendere in carico.\n{message}")
