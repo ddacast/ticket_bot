@@ -14,8 +14,8 @@ DETAIL_URL = "https://ynap.kappa3.app/home/ticketing/ticket/detail?id="
 
 # Intervalli
 CHECK_INTERVAL = 60  # ogni 60 secondi
-FIRST_REMINDER_AFTER = 900  # 15 minuti
-REMINDER_INTERVAL = 600  # 10 minuti
+FIRST_REMINDER_AFTER = 60  # 1 minuto
+REMINDER_INTERVAL = 60  # 1 minuto
 
 sent_tickets = {}
 
