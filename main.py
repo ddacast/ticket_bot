@@ -102,10 +102,26 @@ def check_ticket(session, ticket_id):
         return False
 
 def send_reminder(ticket_id, message):
-    stato_corrente = sent_tickets.get(ticket_id)
-    if stato_corrente and stato_corrente == "nuovo":
-        send_message(f"🔔 Promemoria ticket #{ticket_id} ancora da prendere in carico.\n{message}")
-        Timer(REMINDER_INTERVAL, send_reminder, args=[ticket_id, message]).start()
+    session = requests.Session()
+    url = DETAIL_URL + str(ticket_id)
+    try:
+        response = session.get(url)
+        print(f"[REMINDER] Status code for ticket #{ticket_id}: {response.status_code}")
+        if response.status_code != 200:
+            print(f"[REMINDER] ❌ Ticket #{ticket_id} non accessibile per controllo stato.")
+            return
+
+        details = parse_ticket_detail(response.text)
+        stato = details["stato_attuale"].lower()
+        print(f"[REMINDER] Stato attuale ticket #{ticket_id}: {stato}")
+
+        if stato == "nuovo":
+            send_message(f"🔔 Promemoria ticket #{ticket_id} ancora da prendere in carico.\n{message}")
+            Timer(REMINDER_INTERVAL, send_reminder, args=[ticket_id, message]).start()
+        else:
+            print(f"[REMINDER] ⛔ Ticket #{ticket_id} non più nuovo — promemoria interrotto.")
+    except Exception as e:
+        print(f"[REMINDER] ❌ Errore durante il controllo promemoria: {e}")
 
 def main():
     print("\n🤖 Bot avviato e in ascolto...\n")
@@ -113,7 +129,6 @@ def main():
 
     session = requests.Session()
 
-    # Prima richiesta per ottenere il token CSRF
     login_page = session.get(LOGIN_URL)
     soup = BeautifulSoup(login_page.text, "html.parser")
     csrf = soup.find("input", {"name": "_csrf"})
@@ -144,7 +159,6 @@ def main():
         print("[ERROR] Login fallito. Controlla credenziali o URL di login.")
         return
 
-    # Imposta ID iniziale da cui partire
     current_id = 21958
 
     while True:
