@@ -97,9 +97,12 @@ def main():
     send_message("🤖 Bot avviato e in ascolto...")
 
     session = requests.Session()
-    login_response = session.post(LOGIN_URL, data={"username": USERNAME, "password": PASSWORD})
+    login_response = session.post(LOGIN_URL, data={"username": USERNAME, "password": PASSWORD}, allow_redirects=False)
     print(f"[DEBUG] Login status code: {login_response.status_code}")
-    print(f"[DEBUG] Login successful: {'Dashboard' in login_response.text or login_response.status_code == 200}")
+    redirect_location = login_response.headers.get("Location", "")
+    print(f"[DEBUG] Redirected to: {redirect_location}")
+    login_successful = redirect_location.startswith("/home") or "home" in redirect_location
+    print(f"[DEBUG] Login successful: {login_successful}")
 
     current_id = int(os.environ.get("START_ID", 21900))
 
