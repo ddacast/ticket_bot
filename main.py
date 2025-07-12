@@ -3,6 +3,7 @@ import os
 import requests
 from bs4 import BeautifulSoup
 from threading import Timer
+import json
 
 # Config
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
@@ -19,6 +20,7 @@ REMINDER_INTERVAL = 60  # 1 minuto
 
 sent_tickets = {}
 pending_reminders = {}
+STATUS_LOG_FILE = "ticket_status_log.json"
 
 
 def send_message(text):
@@ -27,6 +29,21 @@ def send_message(text):
         requests.post(url, data={"chat_id": CHAT_ID, "text": text})
     except Exception as e:
         print(f"[ERROR] Telegram: {e}")
+
+
+def load_status_log():
+    if os.path.exists(STATUS_LOG_FILE):
+        with open(STATUS_LOG_FILE, "r") as f:
+            return json.load(f)
+    return {}
+
+
+def save_status_log(data):
+    with open(STATUS_LOG_FILE, "w") as f:
+        json.dump(data, f)
+
+
+status_log = load_status_log()
 
 
 def parse_ticket_detail(html):
@@ -69,7 +86,6 @@ def parse_ticket_detail(html):
 
 def check_ticket(session, ticket_id):
     print(f"\n[INFO] Controllo ticket ID: {ticket_id}")
-    print(f"[DEBUG] Lista ticket già notificati: {list(sent_tickets.keys())}")
     url = DETAIL_URL + str(ticket_id)
     print(f"[DEBUG] URL: {url}")
     try:
@@ -85,8 +101,8 @@ def check_ticket(session, ticket_id):
         print(f"[DEBUG] Estratti dettagli: {details}")
 
         stato = details["stato_attuale"].lower()
-        stato_prec = sent_tickets.get(ticket_id)
-        sent_tickets[ticket_id] = stato
+        stato_prec = status_log.get(str(ticket_id))
+        status_log[str(ticket_id)] = stato
 
         subject = f"📌 Ticket #{ticket_id}"
         link = url
@@ -116,6 +132,7 @@ def check_ticket(session, ticket_id):
                 del pending_reminders[ticket_id]
                 send_message(f"🚫 Ticket #{ticket_id} non è più 'nuovo'. Promemoria disattivato.")
 
+        save_status_log(status_log)
         return True
 
     except Exception as e:
@@ -124,7 +141,7 @@ def check_ticket(session, ticket_id):
 
 
 def send_reminder(ticket_id, message):
-    stato_corrente = sent_tickets.get(ticket_id)
+    stato_corrente = status_log.get(str(ticket_id))
     if stato_corrente and stato_corrente == "nuovo":
         send_message(f"🔔 Promemoria ticket #{ticket_id} ancora da prendere in carico.\n{message}")
         timer = Timer(REMINDER_INTERVAL, send_reminder, args=[ticket_id, message])
@@ -136,7 +153,7 @@ def is_already_running():
     import socket
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
-        s.bind(("127.0.0.1", 65432))  # Porta libera
+        s.bind(("127.0.0.1", 65432))
         return False
     except socket.error:
         return True
@@ -147,7 +164,6 @@ def main():
         print("\n⚠️ Il bot è già in esecuzione. Uscita.\n")
         return
 
-    import os
     print(f"[DEBUG] Process PID: {os.getpid()}")
     print("\n🤖 Bot avviato e in ascolto...\n")
     send_message("🤖 Bot avviato e in ascolto...")
