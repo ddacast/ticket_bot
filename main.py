@@ -20,7 +20,6 @@ REMINDER_INTERVAL = 60  # 1 minuto
 
 pending_reminders = {}
 STATUS_LOG_FILE = "ticket_status_log.json"
-
 CHECK_RANGE = 100
 
 def send_message(text):
@@ -111,18 +110,13 @@ def check_ticket(session, ticket_id):
         status_log[str(ticket_id)] = {"current": stato, "notified": stato_notificato}
 
         if stato == "nuovo":
-            if stato_notificato != "nuovo":
-                send_message(message)
-                send_message(f"🕐 Ticket #{ticket_id} impostato a 'nuovo', promemoria programmato.")
-                timer = Timer(FIRST_REMINDER_AFTER, send_reminder, args=[ticket_id, message])
-                timer.start()
-                pending_reminders[ticket_id] = timer
-                status_log[str(ticket_id)]["notified"] = "nuovo"
-            elif ticket_id not in pending_reminders:
-                timer = Timer(FIRST_REMINDER_AFTER, send_reminder, args=[ticket_id, message])
-                timer.start()
-                pending_reminders[ticket_id] = timer
-                print(f"[{ticket_id}] 🔁 Nuovo ticket con promemoria riattivato.")
+            send_message(message)
+            send_message(f"🕐 Ticket #{ticket_id} impostato a 'nuovo', promemoria programmato.")
+            timer = Timer(FIRST_REMINDER_AFTER, send_reminder, args=[ticket_id, message])
+            timer.start()
+            pending_reminders[ticket_id] = timer
+            status_log[str(ticket_id)]["notified"] = "nuovo"
+
         else:
             if ticket_id in pending_reminders:
                 pending_reminders[ticket_id].cancel()
