@@ -21,8 +21,7 @@ REMINDER_INTERVAL = 60  # 1 minuto
 pending_reminders = {}
 STATUS_LOG_FILE = "ticket_status_log.json"
 
-CHECK_RANGE = 100  # Numero di ticket da controllare attorno a current_id
-
+CHECK_RANGE = 100
 
 def send_message(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
@@ -139,12 +138,28 @@ def check_ticket(session, ticket_id):
         return False
 
 def send_reminder(ticket_id, message):
-    stato_corrente = status_log.get(str(ticket_id), {}).get("current")
-    if stato_corrente == "nuovo":
-        send_message(f"🔔 Promemoria ticket #{ticket_id} ancora da prendere in carico.\n{message}")
-        timer = Timer(REMINDER_INTERVAL, send_reminder, args=[ticket_id, message])
-        timer.start()
-        pending_reminders[ticket_id] = timer
+    url = DETAIL_URL + str(ticket_id)
+    session = requests.Session()
+    try:
+        response = session.get(url)
+        if response.status_code != 200 or "Dettagli" not in response.text:
+            print(f"[REMINDER] Ticket {ticket_id} non trovato o pagina non valida.")
+            return
+
+        details = parse_ticket_detail(response.text)
+        stato_corrente = details["stato_attuale"].lower()
+
+        if stato_corrente == "nuovo":
+            send_message(f"🔔 Promemoria ticket #{ticket_id} ancora da prendere in carico.\n{message}")
+            timer = Timer(REMINDER_INTERVAL, send_reminder, args=[ticket_id, message])
+            timer.start()
+            pending_reminders[ticket_id] = timer
+        else:
+            if ticket_id in pending_reminders:
+                del pending_reminders[ticket_id]
+            send_message(f"✅ Ticket #{ticket_id} ora è '{stato_corrente}'. Promemoria disattivato.")
+    except Exception as e:
+        print(f"[ERROR] Reminder check fallito per ticket {ticket_id}: {e}")
 
 def is_already_running():
     import socket
@@ -198,12 +213,9 @@ def main():
     current_id = 21958
 
     while True:
-        for offset in range(CHECK_RANGE):
-            ticket_id = current_id - offset
-            if ticket_id > 0:
-                check_ticket(session, ticket_id)
-        for offset in range(1, CHECK_RANGE + 1):
-            check_ticket(session, current_id + offset)
+        for tid in range(current_id - CHECK_RANGE, current_id + 1):
+            check_ticket(session, tid)
+        current_id += 1
         time.sleep(CHECK_INTERVAL)
 
 if __name__ == "__main__":
