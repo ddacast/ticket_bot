@@ -3,6 +3,7 @@ import os
 import requests
 from bs4 import BeautifulSoup
 import json
+import fcntl
 
 # Config
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
@@ -16,6 +17,7 @@ DETAIL_URL = "https://ynap.kappa3.app/home/ticketing/ticket/detail?id="
 CHECK_INTERVAL = 60  # ogni 60 secondi
 STATUS_LOG_FILE = "ticket_status_log.json"
 CHECK_RANGE = 100
+LOCK_FILE = "/tmp/ticket_bot.lock"
 
 
 def send_message(text):
@@ -36,6 +38,26 @@ def load_status_log():
 def save_status_log(data):
     with open(STATUS_LOG_FILE, "w") as f:
         json.dump(data, f)
+
+
+def create_lock_file():
+    global lock_fp
+    try:
+        lock_fp = open(LOCK_FILE, "w")
+        fcntl.lockf(lock_fp, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except IOError:
+        print("\n⚠️ Il bot è già in esecuzione (lock file attivo).\n")
+        exit(1)
+
+
+def remove_lock_file():
+    global lock_fp
+    try:
+        fcntl.lockf(lock_fp, fcntl.LOCK_UN)
+        lock_fp.close()
+        os.remove(LOCK_FILE)
+    except:
+        pass
 
 
 status_log = load_status_log()
@@ -112,7 +134,7 @@ def check_ticket(session, ticket_id):
             status_log[str(ticket_id)] = stato
             save_status_log(status_log)
 
-        if stato == "nuovo":
+        if stato == "nuovo" and stato_prec != "nuovo":
             details = parse_full_details(response.text)
             subject = f"📌 Ticket #{ticket_id}"
             message = (
@@ -133,62 +155,53 @@ def check_ticket(session, ticket_id):
         return False
 
 
-def is_already_running():
-    import socket
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    try:
-        s.bind(("127.0.0.1", 65432))
-        return False
-    except socket.error:
-        return True
-
-
 def main():
-    if is_already_running():
-        print("\n⚠️ Il bot è già in esecuzione. Uscita.\n")
-        return
+    create_lock_file()
+    try:
+        print("\n🤖 Bot avviato e in ascolto...\n")
+        send_message("🤖 Bot avviato e in ascolto...")
 
-    print("\n🤖 Bot avviato e in ascolto...\n")
-    send_message("🤖 Bot avviato e in ascolto...")
+        session = requests.Session()
+        login_page = session.get(LOGIN_URL)
+        soup = BeautifulSoup(login_page.text, "html.parser")
+        csrf = soup.find("input", {"name": "_csrf"})
+        csrf_token = csrf["value"] if csrf else ""
 
-    session = requests.Session()
-    login_page = session.get(LOGIN_URL)
-    soup = BeautifulSoup(login_page.text, "html.parser")
-    csrf = soup.find("input", {"name": "_csrf"})
-    csrf_token = csrf["value"] if csrf else ""
+        payload = {
+            "_csrf": csrf_token,
+            "LoginForm[identity]": USERNAME,
+            "LoginForm[password]": PASSWORD,
+            "LoginForm[rememberMe]": "1",
+            "login-button": "Login"
+        }
 
-    payload = {
-        "_csrf": csrf_token,
-        "LoginForm[identity]": USERNAME,
-        "LoginForm[password]": PASSWORD,
-        "LoginForm[rememberMe]": "1",
-        "login-button": "Login"
-    }
+        headers = {
+            "User-Agent": "Mozilla/5.0",
+            "Referer": LOGIN_URL
+        }
 
-    headers = {
-        "User-Agent": "Mozilla/5.0",
-        "Referer": LOGIN_URL
-    }
+        login_response = session.post(LOGIN_URL, data=payload, headers=headers, allow_redirects=False)
+        print(f"[DEBUG] Login status code: {login_response.status_code}")
+        redirect_location = login_response.headers.get("Location", "")
+        print(f"[DEBUG] Redirected to: {redirect_location}")
 
-    login_response = session.post(LOGIN_URL, data=payload, headers=headers, allow_redirects=False)
-    print(f"[DEBUG] Login status code: {login_response.status_code}")
-    redirect_location = login_response.headers.get("Location", "")
-    print(f"[DEBUG] Redirected to: {redirect_location}")
+        login_successful = "/home" in redirect_location and "/sign-in" not in redirect_location
+        print(f"[DEBUG] Login successful: {login_successful}")
 
-    login_successful = "/home" in redirect_location and "/sign-in" not in redirect_location
-    print(f"[DEBUG] Login successful: {login_successful}")
+        if not login_successful:
+            print("[ERROR] Login fallito. Controlla credenziali o URL di login.")
+            return
 
-    if not login_successful:
-        print("[ERROR] Login fallito. Controlla credenziali o URL di login.")
-        return
+        current_id = 21958
 
-    current_id = 21958
+        while True:
+            for tid in range(current_id - CHECK_RANGE, current_id + 1):
+                check_ticket(session, tid)
+            current_id += 1
+            time.sleep(CHECK_INTERVAL)
 
-    while True:
-        for tid in range(current_id - CHECK_RANGE, current_id + 1):
-            check_ticket(session, tid)
-        current_id += 1
-        time.sleep(CHECK_INTERVAL)
+    finally:
+        remove_lock_file()
 
 
 if __name__ == "__main__":
