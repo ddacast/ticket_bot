@@ -28,22 +28,39 @@ def send_message(text):
 
 def parse_ticket_detail(html):
     soup = BeautifulSoup(html, "html.parser")
-    details = {}
+    details = {
+        "area": "Non disponibile",
+        "priorità": "Non disponibile",
+        "stato": "Non disponibile",
+        "agente": "Non disponibile",
+        "macchina": "Non disponibile",
+        "stato_attuale": "Non disponibile"
+    }
 
-    def get_detail(label):
-        tag = soup.find("div", string=lambda s: s and label in s)
-        if tag:
-            sibling = tag.find_next_sibling("div")
-            return sibling.text.strip() if sibling else "Non disponibile"
-        return "Non disponibile"
+    for row in soup.find_all("div", class_="row listdetail"):
+        label_div = row.find("div", class_="col-md-5") or row.find("div", class_="col-md-6")
+        value_div = row.find("div", class_="col-md-7") or row.find("div", class_="col-md-6")
+        if not label_div or not value_div:
+            continue
+        label = label_div.get_text(strip=True).lower()
+        value = value_div.get_text(strip=True)
 
-    details["area"] = get_detail("Area")
-    details["priorità"] = get_detail("Priority")
-    details["stato"] = get_detail("Stato")
-    details["agente"] = get_detail("Agente")
-    details["macchina"] = get_detail("Macchina")
-
-    details["stato_attuale"] = details["stato"]
+        if "area" in label:
+            details["area"] = value
+        elif "priorit" in label:
+            selected = value_div.find("option", selected=True)
+            details["priorità"] = selected.text.strip() if selected else value
+        elif "stato" in label:
+            selected = value_div.find("option", selected=True)
+            stato = selected.text.strip() if selected else value
+            details["stato"] = stato
+            details["stato_attuale"] = stato
+        elif "agente" in label:
+            selected = value_div.find("option", selected=True)
+            details["agente"] = selected.text.strip() if selected else value
+        elif "macchina" in label:
+            selected = value_div.find("option", selected=True)
+            details["macchina"] = selected.text.strip() if selected else value
 
     return details
 
