@@ -21,6 +21,9 @@ REMINDER_INTERVAL = 60  # 1 minuto
 pending_reminders = {}
 STATUS_LOG_FILE = "ticket_status_log.json"
 
+CHECK_RANGE = 100  # Numero di ticket da controllare attorno a current_id
+
+
 def send_message(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     try:
@@ -195,11 +198,12 @@ def main():
     current_id = 21958
 
     while True:
-        success = check_ticket(session, current_id)
-        if success:
-            current_id += 1
-        else:
-            print(f"[INFO] Ticket {current_id} non trovato, rimanendo su questo ID...")
+        for offset in range(CHECK_RANGE):
+            ticket_id = current_id - offset
+            if ticket_id > 0:
+                check_ticket(session, ticket_id)
+        for offset in range(1, CHECK_RANGE + 1):
+            check_ticket(session, current_id + offset)
         time.sleep(CHECK_INTERVAL)
 
 if __name__ == "__main__":
