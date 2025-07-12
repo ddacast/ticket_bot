@@ -74,7 +74,7 @@ def check_ticket(session, ticket_id):
 
         if response.status_code != 200 or "Dettagli" not in response.text:
             print(f"[{ticket_id}] ❌ Ticket non valido o non trovato.")
-            return
+            return False
 
         details = parse_ticket_detail(response.text)
         print(f"[DEBUG] Estratti dettagli: {details}")
@@ -82,7 +82,7 @@ def check_ticket(session, ticket_id):
         stato = details["stato_attuale"].lower()
         if "risolto" in stato or "chiuso" in stato:
             print(f"[{ticket_id}] ✅ Ticket risolto o chiuso.")
-            return
+            return False
 
         subject = f"📌 Ticket #{ticket_id}"
         link = url
@@ -95,8 +95,11 @@ def check_ticket(session, ticket_id):
             print(f"[{ticket_id}] ⏰ Ticket in attesa, promemoria programmato.")
             Timer(FIRST_REMINDER_AFTER, send_reminder, args=[ticket_id, message]).start()
 
+        return True
+
     except Exception as e:
         print(f"[ERROR] ticket {ticket_id}: {e}")
+        return False
 
 def send_reminder(ticket_id, message):
     stato_corrente = sent_tickets.get(ticket_id)
@@ -145,8 +148,11 @@ def main():
     current_id = 21958
 
     while True:
-        check_ticket(session, current_id)
-        current_id += 1
+        success = check_ticket(session, current_id)
+        if success:
+            current_id += 1
+        else:
+            print(f"[INFO] Ticket {current_id} non trovato, rimanendo su questo ID...")
         time.sleep(CHECK_INTERVAL)
 
 if __name__ == "__main__":
