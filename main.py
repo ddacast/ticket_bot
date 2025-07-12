@@ -18,7 +18,7 @@ FIRST_REMINDER_AFTER = 60  # 1 minuto
 REMINDER_INTERVAL = 60  # 1 minuto
 
 sent_tickets = {}
-
+pending_reminders = {}
 
 def send_message(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
@@ -26,7 +26,6 @@ def send_message(text):
         requests.post(url, data={"chat_id": CHAT_ID, "text": text})
     except Exception as e:
         print(f"[ERROR] Telegram: {e}")
-
 
 def parse_ticket_detail(html):
     soup = BeautifulSoup(html, "html.parser")
@@ -65,9 +64,9 @@ def parse_ticket_detail(html):
 
     return details
 
-
 def check_ticket(session, ticket_id):
     print(f"\n[INFO] Controllo ticket ID: {ticket_id}")
+    print(f"[DEBUG] Lista ticket già notificati: {list(sent_tickets.keys())}")
     url = DETAIL_URL + str(ticket_id)
     print(f"[DEBUG] URL: {url}")
     try:
@@ -89,6 +88,9 @@ def check_ticket(session, ticket_id):
 
         if stato != "nuovo":
             print(f"[{ticket_id}] ⏩ Ticket non nuovo: stato = {stato}. Nessuna notifica inviata.")
+            if ticket_id in pending_reminders:
+                pending_reminders[ticket_id].cancel()
+                del pending_reminders[ticket_id]
             return True
 
         subject = f"📌 Ticket #{ticket_id}"
@@ -96,31 +98,50 @@ def check_ticket(session, ticket_id):
         message = f"{subject}\nArea: {details['area']}\nPriorità: {details['priorità']}\nStato: {details['stato']}\nAgente: {details['agente']}\nMacchina: {details['macchina']}\n🔗 {link}"
 
         if ticket_id not in sent_tickets:
+            print(f"[DEBUG] Nuovo ticket trovato, ID: {ticket_id}, non ancora notificato.")
             send_message(message)
             print(f"[{ticket_id}] ⏰ Ticket in attesa, promemoria programmato.")
-            Timer(FIRST_REMINDER_AFTER, send_reminder, args=[ticket_id, message]).start()
+            timer = Timer(FIRST_REMINDER_AFTER, send_reminder, args=[ticket_id, message])
+            timer.start()
+            pending_reminders[ticket_id] = timer
+            sent_tickets[ticket_id] = stato
+        else:
+            print(f"[DEBUG] Ticket già notificato: {ticket_id}, stato attuale = {stato}")
 
-        sent_tickets[ticket_id] = stato
         return True
 
     except Exception as e:
         print(f"[ERROR] ticket {ticket_id}: {e}")
         return False
 
-
 def send_reminder(ticket_id, message):
     stato_corrente = sent_tickets.get(ticket_id)
     if stato_corrente and stato_corrente == "nuovo":
         send_message(f"🔔 Promemoria ticket #{ticket_id} ancora da prendere in carico.\n{message}")
-        Timer(REMINDER_INTERVAL, send_reminder, args=[ticket_id, message]).start()
+        timer = Timer(REMINDER_INTERVAL, send_reminder, args=[ticket_id, message])
+        timer.start()
+        pending_reminders[ticket_id] = timer
 
+def is_already_running():
+    import socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.bind(("127.0.0.1", 65432))  # Porta libera
+        return False
+    except socket.error:
+        return True
 
 def main():
+    if is_already_running():
+        print("\n⚠️ Il bot è già in esecuzione. Uscita.\n")
+        return
+
+    import os
+    print(f"[DEBUG] Process PID: {os.getpid()}")
     print("\n🤖 Bot avviato e in ascolto...\n")
     send_message("🤖 Bot avviato e in ascolto...")
 
     session = requests.Session()
-
     login_page = session.get(LOGIN_URL)
     soup = BeautifulSoup(login_page.text, "html.parser")
     csrf = soup.find("input", {"name": "_csrf"})
@@ -160,7 +181,6 @@ def main():
         else:
             print(f"[INFO] Ticket {current_id} non trovato, rimanendo su questo ID...")
         time.sleep(CHECK_INTERVAL)
-
 
 if __name__ == "__main__":
     main()
