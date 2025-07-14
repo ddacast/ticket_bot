@@ -5,7 +5,7 @@ from threading import Timer
 
 # Configurazione
 TOKEN = "7849103119:AAErLG-ekv-a3VEoMGtwzsqWcd_G8vMyaAw"
-CHAT_IDS = ["1357205243", "1234567890", "9876543210"]  # Aggiungi qui gli altri chat_id
+CHAT_ID = ["1357205243"]  # Aggiungi qui gli altri chat_id
 
 TICKET_CHECK_INTERVAL = 60  # ogni 60 secondi
 FIRST_REMINDER_AFTER = 60   # primo promemoria dopo 1 minuto
@@ -18,7 +18,7 @@ reminder_timers = {}        # {ticket_id: Timer()}
 
 def send_message(text):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    for chat_id in CHAT_IDS:
+    for chat_id in CHAT_ID:
         try:
             response = requests.post(url, data={"chat_id": chat_id, "text": text})
             print(f"[DEBUG] Messaggio inviato a chat_id: {chat_id} - Status code: {response.status_code}")
