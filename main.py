@@ -7,12 +7,11 @@ from threading import Timer
 # === CONFIG ===
 TOKEN = os.environ["BOT_TOKEN"]
 chat_id = os.environ["CHAT_ID"]
-
 USERNAME = os.environ["LOGIN_USERNAME"]
 PASSWORD = os.environ["LOGIN_PASSWORD"]
 
-LOGIN_URL = "https://ynap.kappa3.app/home/user/sign-in/login"
-TICKETING_URL = "https://ynap.kappa3.app/home/ticketing"
+LOGIN_URL = "https://ynap.kappa3.app/login"
+DETAIL_URL = "https://ynap.kappa3.app/home/ticketing/ticket/detail?id="
 
 TICKET_CHECK_INTERVAL = 60
 FIRST_REMINDER_AFTER = 60
@@ -20,8 +19,9 @@ REMINDER_INTERVAL = 60
 
 ticket_status = {}
 reminder_timers = {}
-
 session = requests.Session()
+
+last_checked_id = 21900  # ID iniziale — cambia se serve
 
 
 def send_message(text):
@@ -32,9 +32,9 @@ def send_message(text):
             "text": text,
             "parse_mode": "Markdown"
         })
-        print(f"[DEBUG] INVIO ➜ chat_id: {chat_id}, status: {response.status_code}, response: {response.text}")
+        print(f"[DEBUG] INVIO ➜ chat_id: {chat_id}, status: {response.status_code}")
     except Exception as e:
-        print(f"[ERROR] Errore invio messaggio Telegram: {e}")
+        print(f"[ERROR] Telegram: {e}")
 
 
 def login():
@@ -44,48 +44,44 @@ def login():
             "password": PASSWORD
         })
         print(f"[DEBUG] Login status: {response.status_code}")
-        if "incorrect" in response.text.lower():
-            print("[ERROR] Login fallito: credenziali errate?")
         return response.status_code == 200
     except Exception as e:
         print(f"[ERROR] Login fallito: {e}")
         return False
 
 
-def get_tickets():
-    response = session.get(TICKETING_URL)
+def parse_ticket(ticket_id):
+    url = f"{DETAIL_URL}{ticket_id}"
+    response = session.get(url)
+
+    if response.status_code != 200:
+        print(f"[DEBUG] Ticket {ticket_id} non trovato (status {response.status_code})")
+        return None
+
     soup = BeautifulSoup(response.text, "html.parser")
 
-    with open("pagina.html", "w", encoding="utf-8") as f:
-        f.write(response.text)
+    subject_tag = soup.select_one("h5")
+    subject = subject_tag.text.strip() if subject_tag else f"Ticket #{ticket_id}"
 
-    tickets = {}
-    for row in soup.select("table.tkt-table tr"):
-        ticket_id = row.get("data-key")
-        if not ticket_id or not ticket_id.isdigit():
-            continue
+    stato_tag = soup.find(string=lambda s: "Stato" in s)
+    if stato_tag:
+        stato = stato_tag.find_next().text.strip().lower()
+    else:
+        stato = "non trovato"
 
-        subject_tag = row.select_one("h5 a")
-        subject = subject_tag.text.strip() if subject_tag else ""
-        link = f"https://ynap.kappa3.app{subject_tag['href']}" if subject_tag else ""
+    print(f"[DEBUG] Ticket {ticket_id} ➜ stato: '{stato}'")
 
-        status_tag = row.select_one(".fa-ticket")
-        stato = status_tag.next_sibling.strip().lower() if status_tag and status_tag.next_sibling else ""
-
-        print(f"[DEBUG] TICKET ➜ ID={ticket_id}, stato='{stato}', subject='{subject}'")
-
-        tickets[int(ticket_id)] = {
-            "subject": subject,
-            "link": link,
-            "stato": stato
-        }
-
-    print(f"[DEBUG] Totale ticket trovati: {len(tickets)}")
-    return tickets
+    return {
+        "id": ticket_id,
+        "subject": subject,
+        "stato": stato,
+        "link": url
+    }
 
 
-def check_ticket(ticket_id, data):
-    stato = data["stato"].strip().lower()
+def check_ticket(data):
+    ticket_id = data["id"]
+    stato = data["stato"]
     subject = data["subject"].replace("*", "").replace("_", "")
     link = data["link"]
 
@@ -93,20 +89,14 @@ def check_ticket(ticket_id, data):
     old_stato = old_entry.get("stato")
     was_notified = old_entry.get("notificato", False)
 
-    print(f"\n[DEBUG] Analizzo ticket #{ticket_id}")
-    print(f"        Stato attuale:    '{stato}'")
-    print(f"        Stato precedente: '{old_stato}'")
-    print(f"        Già notificato?:  {was_notified}")
-
     ticket_status[ticket_id] = {"stato": stato, "notificato": was_notified}
 
     if old_stato and old_stato != stato:
         send_message(f"🔄 Ticket #{ticket_id} cambiato da *{old_stato}* a *{stato}*")
 
-    if stato == "nuovo":
+    if stato == "nuovo" and not was_notified:
         send_message(f"🆕 Ticket #{ticket_id} è in stato *nuovo*\n_{subject}_\n🔗 {link}")
         ticket_status[ticket_id]["notificato"] = True
-
         if ticket_id not in reminder_timers:
             start_reminder(ticket_id, subject, link)
 
@@ -114,7 +104,6 @@ def check_ticket(ticket_id, data):
         reminder_timers[ticket_id].cancel()
         del reminder_timers[ticket_id]
         ticket_status[ticket_id]["notificato"] = False
-        print(f"[INFO] Reminder disattivato per ticket {ticket_id}")
 
 
 def start_reminder(ticket_id, subject, link):
@@ -134,22 +123,28 @@ def start_reminder(ticket_id, subject, link):
 
 
 def main():
-    print("🤖 Avvio bot con login...\n")
-    send_message("📡 *Avvio monitoraggio ticket...*")
+    global last_checked_id
+
+    print("🤖 Avvio bot incrementale...\n")
+    send_message("📡 *Bot attivo con ricerca ticket automatica*")
 
     if not login():
-        send_message("❌ *Login fallito!* Controlla le credenziali.")
+        send_message("❌ *Login fallito!* Controlla credenziali Railway.")
         return
 
-    send_message("✅ *Login riuscito! Monitoraggio attivo.*")
+    send_message("✅ *Login riuscito! Inizio monitoraggio...*")
 
     while True:
         try:
-            tickets = get_tickets()
-            for ticket_id, data in tickets.items():
-                check_ticket(ticket_id, data)
+            print(f"[DEBUG] Scansione da ID {last_checked_id} a {last_checked_id + 100}")
+            for ticket_id in range(last_checked_id, last_checked_id + 100):
+                data = parse_ticket(ticket_id)
+                if data:
+                    check_ticket(data)
+            last_checked_id += 100
         except Exception as e:
-            send_message(f"❌ Errore nel ciclo:\n`{str(e)}`")
+            send_message(f"❌ Errore:\n`{str(e)}`")
+
         time.sleep(TICKET_CHECK_INTERVAL)
 
 
