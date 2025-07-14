@@ -11,7 +11,7 @@ chat_id = os.environ["CHAT_ID"]
 USERNAME = os.environ["LOGIN_USERNAME"]
 PASSWORD = os.environ["LOGIN_PASSWORD"]
 
-LOGIN_URL = "https://ynap.kappa3.app/login"
+LOGIN_URL = https://ynap.kappa3.app/home/user/sign-in/logins
 TICKETING_URL = "https://ynap.kappa3.app/home/ticketing"
 
 TICKET_CHECK_INTERVAL = 60
