@@ -10,7 +10,7 @@ chat_id = os.environ["CHAT_ID"]
 USERNAME = os.environ["LOGIN_USERNAME"]
 PASSWORD = os.environ["LOGIN_PASSWORD"]
 
-LOGIN_URL = "https://ynap.kappa3.app/login"
+LOGIN_URL = "https://ynap.kappa3.app/home/user/sign-in/login"
 DETAIL_URL = "https://ynap.kappa3.app/home/ticketing/ticket/detail?id="
 
 TICKET_CHECK_INTERVAL = 60
@@ -21,7 +21,7 @@ ticket_status = {}
 reminder_timers = {}
 session = requests.Session()
 
-last_checked_id = 21900  # ID iniziale — cambia se serve
+last_checked_id = 21900  # puoi partire da un ID vicino all’ultimo ticket noto
 
 
 def send_message(text):
@@ -39,12 +39,34 @@ def send_message(text):
 
 def login():
     try:
-        response = session.post(LOGIN_URL, data={
-            "username": USERNAME,
-            "password": PASSWORD
-        })
+        # STEP 1: prendi la pagina login per estrarre il CSRF token
+        login_page = session.get(LOGIN_URL)
+        soup = BeautifulSoup(login_page.text, "html.parser")
+        csrf_token = soup.find("input", {"name": "_csrf"})["value"]
+
+        # STEP 2: invia la POST con tutti i campi
+        payload = {
+            "_csrf": csrf_token,
+            "LoginForm[identity]": USERNAME,
+            "LoginForm[password]": PASSWORD,
+            "LoginForm[rememberMe]": "1"
+        }
+
+        headers = {
+            "Referer": LOGIN_URL,
+            "Origin": "https://ynap.kappa3.app"
+        }
+
+        response = session.post(LOGIN_URL, data=payload, headers=headers)
+
         print(f"[DEBUG] Login status: {response.status_code}")
-        return response.status_code == 200
+
+        if "logout" in response.text.lower() or "dashboard" in response.text.lower():
+            return True
+        else:
+            print("[ERROR] Login non riuscito: token o credenziali sbagliate?")
+            return False
+
     except Exception as e:
         print(f"[ERROR] Login fallito: {e}")
         return False
@@ -63,11 +85,12 @@ def parse_ticket(ticket_id):
     subject_tag = soup.select_one("h5")
     subject = subject_tag.text.strip() if subject_tag else f"Ticket #{ticket_id}"
 
-    stato_tag = soup.find(string=lambda s: "Stato" in s)
-    if stato_tag:
-        stato = stato_tag.find_next().text.strip().lower()
-    else:
-        stato = "non trovato"
+    stato = "non trovato"
+    for strong in soup.find_all("strong"):
+        if "stato" in strong.text.lower():
+            stato_tag = strong.find_next()
+            stato = stato_tag.text.strip().lower() if stato_tag else "non trovato"
+            break
 
     print(f"[DEBUG] Ticket {ticket_id} ➜ stato: '{stato}'")
 
@@ -125,18 +148,17 @@ def start_reminder(ticket_id, subject, link):
 def main():
     global last_checked_id
 
-    print("🤖 Avvio bot incrementale...\n")
-    send_message("📡 *Bot attivo con ricerca ticket automatica*")
+    print("🤖 Avvio bot con login e monitoraggio ticket...")
+    send_message("📡 *Bot attivo con ricerca automatica dei ticket*")
 
     if not login():
-        send_message("❌ *Login fallito!* Controlla credenziali Railway.")
+        send_message("❌ *Login fallito!* Controlla le credenziali in Railway.")
         return
 
-    send_message("✅ *Login riuscito! Inizio monitoraggio...*")
+    send_message("✅ *Login riuscito!* Inizio monitoraggio...")
 
     while True:
         try:
-            print(f"[DEBUG] Scansione da ID {last_checked_id} a {last_checked_id + 100}")
             for ticket_id in range(last_checked_id, last_checked_id + 100):
                 data = parse_ticket(ticket_id)
                 if data:
