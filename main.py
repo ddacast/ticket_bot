@@ -1,25 +1,33 @@
 import time
+import os
 import requests
 from bs4 import BeautifulSoup
 from threading import Timer
 
 # === CONFIG ===
-TOKEN = "7849103119:AAErLG-ekv-a3VEoMGtwzsqWcd_G8vMyaAw"
-chat_id = "1357205243"
+TOKEN = os.environ["BOT_TOKEN"]
+chat_id = os.environ["CHAT_ID"]
+
+USERNAME = os.environ["LOGIN_USERNAME"]
+PASSWORD = os.environ["LOGIN_PASSWORD"]
+
+LOGIN_URL = "https://ynap.kappa3.app/login"
+TICKETING_URL = "https://ynap.kappa3.app/home/ticketing"
 
 TICKET_CHECK_INTERVAL = 60
 FIRST_REMINDER_AFTER = 60
 REMINDER_INTERVAL = 60
 
-ticket_status = {}          # {ticket_id: {"stato": ..., "notificato": True/False}}
-reminder_timers = {}        # {ticket_id: Timer()}
+ticket_status = {}
+reminder_timers = {}
+
+session = requests.Session()
 
 
-# === INVIO MESSAGGI ===
 def send_message(text):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     try:
-        response = requests.post(url, data={
+        response = session.post(url, data={
             "chat_id": chat_id,
             "text": text,
             "parse_mode": "Markdown"
@@ -29,12 +37,27 @@ def send_message(text):
         print(f"[ERROR] Errore invio messaggio Telegram: {e}")
 
 
-# === ESTRAZIONE TICKET ===
+def login():
+    try:
+        response = session.post(LOGIN_URL, data={
+            "username": USERNAME,
+            "password": PASSWORD
+        })
+        print(f"[DEBUG] Login status: {response.status_code}")
+        if "incorrect" in response.text.lower():
+            print("[ERROR] Login fallito: credenziali errate?")
+        return response.status_code == 200
+    except Exception as e:
+        print(f"[ERROR] Login fallito: {e}")
+        return False
+
+
 def get_tickets():
-    url = "https://ynap.kappa3.app/home/ticketing"
-    session = requests.Session()
-    response = session.get(url)
+    response = session.get(TICKETING_URL)
     soup = BeautifulSoup(response.text, "html.parser")
+
+    with open("pagina.html", "w", encoding="utf-8") as f:
+        f.write(response.text)
 
     tickets = {}
     for row in soup.select("table.tkt-table tr"):
@@ -61,7 +84,6 @@ def get_tickets():
     return tickets
 
 
-# === GESTIONE TICKET ===
 def check_ticket(ticket_id, data):
     stato = data["stato"].strip().lower()
     subject = data["subject"].replace("*", "").replace("_", "")
@@ -71,43 +93,30 @@ def check_ticket(ticket_id, data):
     old_stato = old_entry.get("stato")
     was_notified = old_entry.get("notificato", False)
 
-    # DEBUG DETTAGLIATO
     print(f"\n[DEBUG] Analizzo ticket #{ticket_id}")
     print(f"        Stato attuale:    '{stato}'")
     print(f"        Stato precedente: '{old_stato}'")
     print(f"        Già notificato?:  {was_notified}")
 
-    # AGGIORNA STATO
     ticket_status[ticket_id] = {"stato": stato, "notificato": was_notified}
 
-    # INVIA SE CAMBIATO
     if old_stato and old_stato != stato:
-        print(f"        🔄 Stato cambiato: invio notifica")
         send_message(f"🔄 Ticket #{ticket_id} cambiato da *{old_stato}* a *{stato}*")
 
-    # INVIA SEMPRE SE NUOVO
     if stato == "nuovo":
-        print(f"        🆕 NUOVO: invio messaggio e avvio reminder")
         send_message(f"🆕 Ticket #{ticket_id} è in stato *nuovo*\n_{subject}_\n🔗 {link}")
         ticket_status[ticket_id]["notificato"] = True
 
         if ticket_id not in reminder_timers:
             start_reminder(ticket_id, subject, link)
-    else:
-        print(f"        ⛔ Non è nuovo. Nessuna azione.")
 
-    # STOP PROMEMORIA SE NON È PIÙ NUOVO
     if stato != "nuovo" and ticket_id in reminder_timers:
-        print(f"        🛑 Stop reminder per ticket #{ticket_id}")
         reminder_timers[ticket_id].cancel()
         del reminder_timers[ticket_id]
         ticket_status[ticket_id]["notificato"] = False
-
-    # DEBUG AGGIUNTIVO DI CONTROLLO
-    send_message(f"🔍 DEBUG: Ticket #{ticket_id} analizzato (stato: *{stato}*)")
+        print(f"[INFO] Reminder disattivato per ticket {ticket_id}")
 
 
-# === PROMEMORIA PERIODICO ===
 def start_reminder(ticket_id, subject, link):
     def send():
         stato_attuale = ticket_status.get(ticket_id, {}).get("stato")
@@ -124,10 +133,16 @@ def start_reminder(ticket_id, subject, link):
     reminder_timers[ticket_id] = t
 
 
-# === CICLO PRINCIPALE ===
 def main():
-    print("🤖 Bot avviato. Controllo ogni 60 secondi...\n")
-    send_message("✅ *Bot attivo!* Monitoraggio ticket iniziato.")
+    print("🤖 Avvio bot con login...\n")
+    send_message("📡 *Avvio monitoraggio ticket...*")
+
+    if not login():
+        send_message("❌ *Login fallito!* Controlla le credenziali.")
+        return
+
+    send_message("✅ *Login riuscito! Monitoraggio attivo.*")
+
     while True:
         try:
             tickets = get_tickets()
@@ -138,6 +153,5 @@ def main():
         time.sleep(TICKET_CHECK_INTERVAL)
 
 
-# === AVVIO SCRIPT ===
 if __name__ == "__main__":
     main()
