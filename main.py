@@ -3,33 +3,26 @@ import requests
 from bs4 import BeautifulSoup
 from threading import Timer
 
-# === Configurazione ===
+# Configurazione
 TOKEN = "7849103119:AAErLG-ekv-a3VEoMGtwzsqWcd_G8vMyaAw"
-chat_id = "1357205243"
+CHAT_ID = "1357205243"
+TICKET_CHECK_INTERVAL = 60  # ogni 60 secondi
+FIRST_REMINDER_AFTER = 60   # primo promemoria dopo 1 minuto
+REMINDER_INTERVAL = 60      # promemoria ogni 1 minuto
 
-TICKET_CHECK_INTERVAL = 60  # Ogni 60 secondi
-FIRST_REMINDER_AFTER = 60   # Primo promemoria dopo 1 minuto
-REMINDER_INTERVAL = 60      # Promemoria ogni minuto
-
-ticket_status = {}          # {ticket_id: {"stato": ..., "notificato": True/False}}
+# Stato dei ticket
+ticket_status = {}          # {id: {"stato": ..., "notificato": True/False}}
 reminder_timers = {}        # {ticket_id: Timer()}
 
 
-# === Funzione invio messaggi ===
 def send_message(text):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     try:
-        response = requests.post(url, data={
-            "chat_id": chat_id,
-            "text": text,
-            "parse_mode": "Markdown"  # Sicuro per simboli * _ ecc.
-        })
-        print(f"[DEBUG] Status: {response.status_code} - Risposta: {response.text}")
+        requests.post(url, data={"chat_id": CHAT_ID, "text": text})
     except Exception as e:
-        print(f"[ERROR] Invio fallito: {e}")
+        print(f"[ERROR] Telegram: {e}")
 
 
-# === Recupero ticket dalla pagina HTML ===
 def get_tickets():
     url = "https://ynap.kappa3.app/home/ticketing"
     session = requests.Session()
@@ -58,26 +51,29 @@ def get_tickets():
     return tickets
 
 
-# === Controllo stato dei ticket ===
 def check_ticket(ticket_id, data):
     stato = data["stato"]
-    subject = data["subject"].replace("*", "").replace("_", "")
+    subject = data["subject"]
     link = data["link"]
 
     old_entry = ticket_status.get(ticket_id, {})
     old_stato = old_entry.get("stato")
     was_notified = old_entry.get("notificato", False)
 
+    # Aggiorna stato corrente
     ticket_status[ticket_id] = {"stato": stato, "notificato": was_notified}
 
+    # Se lo stato è cambiato
     if old_stato and old_stato != stato:
         send_message(f"🔄 Ticket #{ticket_id} cambiato da *{old_stato}* a *{stato}*")
 
+    # Ticket nuovo, mai notificato
     if stato == "nuovo" and not was_notified:
-        send_message(f"🆕 Ticket #{ticket_id} è in stato *nuovo*\n_{subject}_\n🔗 {link}")
+        send_message(f"🆕 Ticket #{ticket_id} è in stato *nuovo*\n{subject}\n🔗 {link}")
         ticket_status[ticket_id]["notificato"] = True
         start_reminder(ticket_id, subject, link)
 
+    # Ticket non più nuovo → stop promemoria
     if stato != "nuovo" and ticket_id in reminder_timers:
         reminder_timers[ticket_id].cancel()
         del reminder_timers[ticket_id]
@@ -85,37 +81,33 @@ def check_ticket(ticket_id, data):
         print(f"[INFO] Reminder disattivato per ticket {ticket_id}")
 
 
-# === Promemoria ricorsivo ===
 def start_reminder(ticket_id, subject, link):
     def send():
         stato_attuale = ticket_status.get(ticket_id, {}).get("stato")
         if stato_attuale == "nuovo":
-            send_message(f"⏰ Ticket #{ticket_id} è ancora *nuovo*\n_{subject}_\n🔗 {link}")
+            send_message(f"⏰ Ticket #{ticket_id} è ancora *nuovo*\n{subject}\n🔗 {link}")
             t = Timer(REMINDER_INTERVAL, send)
             t.start()
             reminder_timers[ticket_id] = t
         else:
-            print(f"[INFO] Ticket {ticket_id} non è più nuovo. Stop reminder.")
+            print(f"[INFO] Il ticket {ticket_id} non è più nuovo. Stop reminder.")
 
     t = Timer(FIRST_REMINDER_AFTER, send)
     t.start()
     reminder_timers[ticket_id] = t
 
 
-# === Ciclo principale ===
 def main():
-    print("🤖 Bot avviato. Controllo ogni 60 secondi...\n")
-    send_message("✅ *Bot attivo!* Inizio monitoraggio ticket.")
+    print("🤖 Bot avviato. Controllo attivo ogni 60 secondi...\n")
     while True:
         try:
             tickets = get_tickets()
             for ticket_id, data in tickets.items():
                 check_ticket(ticket_id, data)
         except Exception as e:
-            send_message(f"❌ Errore nel ciclo: `{e}`")
+            send_message(f"❌ Errore nel ciclo: {e}")
         time.sleep(TICKET_CHECK_INTERVAL)
 
 
-# === Avvio ===
 if __name__ == "__main__":
     main()
