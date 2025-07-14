@@ -5,7 +5,7 @@ from threading import Timer
 
 # Configurazione
 TOKEN = "7849103119:AAErLG-ekv-a3VEoMGtwzsqWcd_G8vMyaAw"
-CHAT_ID = ["1357205243"]  # Aggiungi qui gli altri chat_id
+CHAT_ID = "1357205243"  # Aggiungi qui gli altri chat_id
 
 TICKET_CHECK_INTERVAL = 60  # ogni 60 secondi
 FIRST_REMINDER_AFTER = 60   # primo promemoria dopo 1 minuto
